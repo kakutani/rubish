@@ -23,7 +23,8 @@ module Rubish
     include Expansion
     include Runtime
 
-    def initialize(login_shell: false, no_profile: false, no_rc: false, restricted: false, rcfile: nil)
+    def initialize(login_shell: false, no_profile: false, no_rc: false, restricted: false, rcfile: nil, frontend: nil)
+      @frontend = frontend || Frontend::Tty.new
       # Create shell state and execution context for this REPL instance
       @state = ShellState.new
       @context = ExecutionContext.new(@state)
@@ -123,6 +124,7 @@ module Rubish
     end
 
     attr_accessor :script_name, :positional_params, :functions, :lineno
+    attr_reader :frontend
 
     def run
       # Start buffering stdin immediately so typed input during slow startup is preserved
@@ -263,10 +265,7 @@ module Rubish
       # Use pre_input_hook to insert buffered text into first readline
       return if buffered.nil? || buffered.empty?
 
-      Reline.pre_input_hook = -> {
-        Reline.insert_text(buffered)
-        Reline.pre_input_hook = nil  # Only for first prompt
-      }
+      @frontend.insert_text(buffered)
     end
 
     private
@@ -310,22 +309,18 @@ module Rubish
       end
 
       return if buffer.nil? || buffer.empty?
-      return if Reline.pre_input_hook
 
-      Reline.pre_input_hook = -> {
-        Reline.insert_text(buffer)
-        Reline.pre_input_hook = nil
-      }
+      @frontend.insert_text(buffer)
     end
 
     def setup_reline
       repl = self
 
-      Reline.completion_proc = ->(input) {
+      @frontend.setup_completion do |input|
         result = repl.send(:complete, input)
         candidates = result.is_a?(Array) ? result : []
         candidates.map { |c| c.end_with?('/') ? c : "#{c} " }
-      }
+      end
 
       # Set up default completions for common commands
       Builtins.setup_default_completions
@@ -383,7 +378,7 @@ module Rubish
     def collect_continuation_lines(accumulated_lines, initial_error)
       loop do
         begin
-          cont_line = Reline.readline(continuation_prompt, false)
+          cont_line = @frontend.read_continuation_line(continuation_prompt)
         rescue Interrupt
           puts
           return nil  # User cancelled
@@ -538,11 +533,7 @@ module Rubish
       left_prompt = prompt
 
       # Don't auto-add to history; we'll do it ourselves after checking HISTCONTROL/HISTIGNORE
-      line = if Reline::Core.instance_method(:readline).parameters.any? { |_, name| name == :rprompt }
-               Reline.readline(prompt: left_prompt, rprompt: right_prompt)
-             else
-               Reline.readline(left_prompt, false)
-             end
+      line = @frontend.read_line(prompt: left_prompt, rprompt: right_prompt)
       unless line
         # EOF received (Ctrl+D)
         # Check IGNOREEOF variable first, then fall back to set -o ignoreeof
@@ -585,10 +576,7 @@ module Rubish
       # histverify: if history expansion occurred, let user verify before executing
       if was_expanded && (Builtins.shopt_enabled?('histverify') || Builtins.zsh_option_enabled?('hist_verify'))
         # Pre-fill the expanded command for user to verify/edit
-        Reline.pre_input_hook = -> {
-          Reline.insert_text(expanded_line)
-          Reline.pre_input_hook = nil  # Clear after use
-        }
+        @frontend.insert_text(expanded_line)
         return  # Don't execute, let user verify on next prompt
       end
 
@@ -670,10 +658,7 @@ module Rubish
 
         # histreedit: if history expansion failed, reload line for editing
         if failed && Builtins.shopt_enabled?('histreedit')
-          Reline.pre_input_hook = -> {
-            Reline.insert_text(original_line)
-            Reline.pre_input_hook = nil  # Clear after use
-          }
+          @frontend.insert_text(original_line)
           return
         end
 
@@ -2252,7 +2237,7 @@ module Rubish
     def collect_heredoc_content(delimiter, strip_tabs)
       lines = []
       loop do
-        line = Reline.readline('> ', false)
+        line = @frontend.read_simple_line('> ')
         break unless line
 
         # Check for delimiter (possibly with leading tabs if strip_tabs)

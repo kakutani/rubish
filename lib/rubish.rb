@@ -41,6 +41,7 @@ require_relative 'rubish/codegen'
 require_relative 'rubish/runtime/command'
 require_relative 'rubish/runtime/job'
 require_relative 'rubish/runtime/builtins'
+require_relative 'rubish/frontend'
 require_relative 'rubish/repl'
 
 module Rubish
