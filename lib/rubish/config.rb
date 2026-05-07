@@ -248,11 +248,29 @@ module Rubish
       end
     end
 
-    # Initialize system PATH via path_helper on macOS
+    # Initialize system PATH via path_helper on macOS.
+    #
+    # /etc/profile runs `eval `/usr/libexec/path_helper -s`` which produces
+    # a multi-statement script (`PATH="..."; export PATH;\nMANPATH="..."; ...`).
+    # Rubish's eval does not split that on the embedded `;` and `\n`, so the
+    # whole script ends up assigned literally to PATH (and MANPATH). When we
+    # then re-invoke path_helper to recover, it appends the existing PATH to
+    # its output — and the embedded `; export PATH;\n...` from PATH's value
+    # ends up inside path_helper's quoted PATH value, defeating the regex.
+    #
+    # Sanitize PATH and MANPATH (strip from the first `;`, which is never
+    # legitimate in a Unix path entry) before invoking path_helper, and run
+    # path_helper with the cleaned env so its output is well-formed.
     def ensure_system_path
       return unless File.executable?('/usr/libexec/path_helper')
 
-      output = `/usr/libexec/path_helper -s`.to_s
+      strip_garbage = ->(val) { val.to_s.split(';', 2).first.to_s }
+      clean_env = ENV.to_h.merge(
+        'PATH' => strip_garbage.call(ENV['PATH']),
+        'MANPATH' => strip_garbage.call(ENV['MANPATH']),
+      )
+      output = IO.popen(clean_env, ['/usr/libexec/path_helper', '-s'], &:read).to_s
+
       output.scan(/(\w+)="([^"]*)"; export \1;/) do |name, value|
         ENV[name] = value
         @state.shell_vars[name] = value if @state.shell_vars.key?(name)
