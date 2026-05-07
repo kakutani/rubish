@@ -24,6 +24,16 @@ module Rubish
     include Runtime
 
     def initialize(login_shell: false, no_profile: false, no_rc: false, restricted: false, rcfile: nil, frontend: nil)
+      # Without LANG/LC_* (e.g. when launched from launchd / a .app
+      # bundle, not from a terminal), Ruby's default external encoding
+      # falls back to US-ASCII, and reading user-authored files like
+      # ~/.config/rubish/config or ~/.rubish_history blows up the moment
+      # they contain a non-ASCII byte. Bash/zsh treat their config as
+      # bytes regardless of locale; the Ruby-shell equivalent is to
+      # assume UTF-8 when the locale didn't pick anything sensible.
+      if Encoding.default_external == Encoding::US_ASCII
+        Encoding.default_external = Encoding::UTF_8
+      end
       @frontend = frontend || Frontend::Tty.new
       # Create shell state and execution context for this REPL instance
       @state = ShellState.new
