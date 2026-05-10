@@ -8,7 +8,7 @@ class TestRUBISH_ENV < Test::Unit::TestCase
     @original_dir = Dir.pwd
     @tempdir = Dir.mktmpdir('rubish_env_test')
     Dir.chdir(@tempdir)
-    @rubish_bin = File.expand_path('../bin/rubish', __dir__)
+    @rubish_bin = File.expand_path('../exe/rubish', __dir__)
   end
 
   def teardown

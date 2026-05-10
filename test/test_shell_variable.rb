@@ -22,7 +22,7 @@ class TestSHELLVariable < Test::Unit::TestCase
     repl = Rubish::REPL.new
     result = repl.send(:find_rubish_path)
 
-    # Should find the bin/rubish in the project
+    # Should find the exe/rubish in the project
     assert_not_nil result
     assert result.end_with?('rubish'), "Expected path ending with 'rubish', got: #{result}"
     assert File.executable?(result), "Expected executable file at: #{result}"

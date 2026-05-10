@@ -540,9 +540,9 @@ module Rubish
         if $PROGRAM_NAME && File.exist?($PROGRAM_NAME)
           File.expand_path($PROGRAM_NAME)
         else
-          bin_path = File.expand_path('../../bin/rubish', __dir__)
-          if File.exist?(bin_path)
-            bin_path
+          exe_path = File.expand_path('../../exe/rubish', __dir__)
+          if File.exist?(exe_path)
+            exe_path
           else
             path_dirs = (ENV['PATH'] || '').split(':')
             path_dirs.map { |d| File.join(d, 'rubish') }.find { |p| File.exist?(p) } || $PROGRAM_NAME || 'rubish'

@@ -30,7 +30,7 @@ brew install --HEAD rubish
 git clone https://github.com/amatsuda/rubish.git
 cd rubish
 bundle install
-bundle exec bin/rubish
+bundle exec exe/rubish
 ```
 
 ## Usage
