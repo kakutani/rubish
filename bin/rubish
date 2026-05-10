@@ -1,1 +1,48 @@
-../exe/rubish
+#!/bin/bash
+# Wrapper that finds a usable Ruby and runs exe/rubish under it.
+# Recommended for casual use: works regardless of whether your shell
+# already has rbenv/homebrew on PATH (e.g. .app bundles, launchd, the
+# minimal env Finder hands out). For dependency-locked dev work prefer
+# `bundle exec exe/rubish`.
+#
+# LaunchServices may pick the x86_64 slice of /bin/bash when this
+# script is launched from a .app bundle. If bash runs translated, Ruby
+# and everything it forks (including brew, called from user shell
+# config) inherits the translated arch and may bail out. Force native
+# arch on Apple Silicon to keep the chain native.
+
+set -e
+
+SCRIPT="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+RUBISH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUBISH_BIN="$RUBISH_ROOT/exe/rubish"
+
+# Pick a Ruby interpreter. Honor an explicit override via $RUBY;
+# otherwise probe common locations (rbenv, homebrew, system) and fall
+# back to whatever `command -v ruby` finds. The first match wins;
+# adjust your PATH or set $RUBY for a specific version.
+if [ -z "${RUBY:-}" ]; then
+  for cand in \
+    "$HOME/.rbenv/shims/ruby" \
+    /opt/homebrew/bin/ruby \
+    /usr/local/bin/ruby \
+    /usr/bin/ruby
+  do
+    if [ -x "$cand" ]; then
+      RUBY="$cand"
+      break
+    fi
+  done
+fi
+RUBY="${RUBY:-$(command -v ruby || true)}"
+if [ -z "$RUBY" ] || [ ! -x "$RUBY" ]; then
+  echo "rubish: no Ruby interpreter found. Set \$RUBY or install one." >&2
+  exit 127
+fi
+
+if [ "$(/usr/sbin/sysctl -in hw.optional.arm64 2>/dev/null)" = "1" ]; then
+  exec /usr/bin/arch -arm64 "$RUBY" "$RUBISH_BIN" "$@"
+else
+  exec "$RUBY" "$RUBISH_BIN" "$@"
+fi
