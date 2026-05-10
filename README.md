@@ -33,6 +33,13 @@ bundle install
 bundle exec exe/rubish
 ```
 
+`bin/rubish` is a small bash launcher that finds a usable Ruby on its own (probes `~/.rbenv/shims/ruby`, `/opt/homebrew/bin/ruby`, `/usr/local/bin/ruby`, system Ruby; honors `$RUBY`). Use it when bundler isn't around — for example as a login shell, from a `.app` bundle, or anywhere `PATH` may be minimal:
+
+```sh
+./bin/rubish
+RUBY=/opt/homebrew/opt/ruby@3.4/bin/ruby ./bin/rubish   # explicit override
+```
+
 ## Usage
 
 Start an interactive shell:
@@ -226,6 +233,60 @@ In addition to full Bash compatibility, rubish also supports zsh-style features:
 
 **Logout**:
 1. `~/.config/rubish/logout` or `~/.rubish_logout` (or `~/.bash_logout`)
+
+## Embedding in a Ruby program
+
+Rubish exposes a public API so other Ruby programs (terminal emulators, IDE plugins, GUI front-ends) can drive a rubish session in-process — no fork+exec, no JSON serialization, just method calls. The sibling [Echoes](https://github.com/amatsuda/echoes) terminal emulator uses this to render syntax-highlighted prompts and decide command-execution shape ahead of time.
+
+```ruby
+require 'rubish'
+
+repl = Rubish::REPL.new(login_shell: true)
+
+# Run interactively (default).
+repl.run
+
+# Or drive it programmatically.
+repl.tokenize('ls | grep foo')         # => Array of Rubish::Lexer::Token (each
+                                       #    with :type and :value) for syntax
+                                       #    highlighting; never raises.
+repl.try_parse('if true; then')        # => :ok | :incomplete | :error
+                                       #    (use to decide PS2 vs. submit).
+repl.parse_ast('echo hi')              # => AST root, or nil on parse failure.
+repl.complete_at(line: 'gi', point: 2) # => Array of completion candidates at
+                                       #    the cursor.
+repl.prompt_segments                   # => Array of styled-text segments
+                                       #    {text:, fg:, bg:, bold:, italic:,
+                                       #     underline:, inverse:}, ANSI codes
+                                       #    already parsed.
+repl.right_prompt_segments             # => same shape for the right prompt,
+                                       #    or nil if unset.
+```
+
+### Custom I/O backend
+
+The default `Rubish::Frontend::Tty` wraps Reline + stdin/stdout. Hosts that own their own line editor can subclass `Rubish::Frontend::Base` and pass an instance into the REPL:
+
+```ruby
+class MyFrontend < Rubish::Frontend::Base
+  def read_line(prompt:, rprompt: nil)
+    # ...feed input from your own UI here
+  end
+end
+
+Rubish::REPL.new(frontend: MyFrontend.new).run
+```
+
+### Child-process pre-exec hook
+
+To run setup code in every forked child between `fork()` and `exec()` (e.g. to attach a per-command controlling tty so the line discipline can deliver `Ctrl-C` to the child):
+
+```ruby
+Rubish::Command.child_pre_exec_hook = -> {
+  Process.setsid
+  # ...ioctls, signal handlers, etc.
+}
+```
 
 ## Builtins
 
