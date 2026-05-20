@@ -327,6 +327,42 @@ module Rubish
       @frontend.insert_text(buffer)
     end
 
+    # zsh-style PROMPT_SP: when the previous command's output didn't end
+    # with a newline, the next prompt would otherwise either start
+    # mid-line or (with Reline clearing the line) erase that last line.
+    # The fix is the column-agnostic trick from zsh: print a visible
+    # mark plus enough spaces to total exactly $COLUMNS characters, then
+    # a carriage return.
+    #
+    # - If we were at column 1 (last output ended with \n): the mark and
+    #   spaces fill the line, \r returns to column 1, the prompt
+    #   overwrites everything — no visible artifact.
+    # - If we were mid-line (no trailing \n): the spaces overflow and
+    #   wrap to the next line, \r returns to column 1 of THAT next line,
+    #   the prompt prints there, and the mark stays visible at the end
+    #   of the partial output.
+    #
+    # `PROMPT_EOL_MARK`, if set, replaces the default "%" — pass an
+    # ANSI-styled string if you want non-default coloring. Set it to
+    # the empty string to disable the visible mark (the prompt still
+    # gets pushed to a fresh line).
+    def emit_prompt_eol_mark
+      return unless $stdout.tty?
+
+      cols = (IO.console&.winsize&.last rescue nil)
+      cols = ENV['COLUMNS'].to_i if !cols || cols <= 0
+      cols = 80 if cols <= 0
+      return if cols < 2
+
+      mark = ENV.fetch('PROMPT_EOL_MARK') { "\e[7m%\e[27m" }
+      mark_width = mark.gsub(/\e\[[0-9;]*m/, '').length
+      padding = cols - mark_width
+      return if padding < 0  # mark wider than the terminal; bail
+
+      $stdout.write(mark, ' ' * padding, "\r")
+      $stdout.flush
+    end
+
     def setup_reline
       repl = self
 
@@ -588,6 +624,11 @@ module Rubish
 
       # Get the left prompt
       left_prompt = prompt
+
+      # If the previous command's output didn't end with a newline,
+      # mark the spot and force the prompt onto a fresh line. zsh's
+      # PROMPT_SP / PROMPT_EOL_MARK behavior.
+      emit_prompt_eol_mark
 
       # Don't auto-add to history; we'll do it ourselves after checking HISTCONTROL/HISTIGNORE
       line = @frontend.read_line(prompt: left_prompt, rprompt: right_prompt)
