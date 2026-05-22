@@ -527,6 +527,16 @@ module Rubish
           # Line changed but point not explicitly set - move to end
           self.byte_pointer = new_line.bytesize
         end
+
+        # A bind -x command (e.g. fzf) may have drawn over and cleared the
+        # screen without Reline knowing, leaving its differential-render cache
+        # stale so the prompt/line is not repainted. Force a full redraw,
+        # mirroring Reline's own handle_resized: re-anchor to the current
+        # cursor row, drop the cache, and repaint from scratch.
+        Reline::IOGate.move_cursor_up(@rendered_screen.cursor_y)
+        @rendered_screen.base_y = Reline::IOGate.cursor_pos.y
+        clear_rendered_screen_cache
+        render
       end
 
       # Convert keymap name to Reline keymap symbol
