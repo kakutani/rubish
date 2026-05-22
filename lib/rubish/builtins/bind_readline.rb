@@ -527,6 +527,13 @@ module Rubish
           # Line changed but point not explicitly set - move to end
           self.byte_pointer = new_line.bytesize
         end
+
+        # fzf and other full-screen bind -x commands repaint the terminal
+        # behind Reline's back; force a full redraw to restore the prompt.
+        Reline::IOGate.move_cursor_up(@rendered_screen.cursor_y)
+        @rendered_screen.base_y = Reline::IOGate.cursor_pos.y
+        clear_rendered_screen_cache
+        render
       end
 
       # Convert keymap name to Reline keymap symbol
