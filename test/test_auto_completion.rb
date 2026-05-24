@@ -380,25 +380,71 @@ class TestAutoCompletion < Test::Unit::TestCase
     assert_empty invoked, 'second deep lookup should be served from cache'
   end
 
-  def test_parse_help_for_command_chain_falls_back_to_help_keyword
-    # When `cmd a b --help` fails, the implementation should also try
-    # `cmd help a b` (matches the rails/gem `cmd help <subcmd>` style).
+  def test_parse_help_for_command_chain_does_not_fall_back_to_help_keyword
+    # Chained calls (`cmd a b --help`) deliberately don't fall back to
+    # `cmd help a b`. Many CLIs — rails being the canonical case —
+    # treat `help X` as a silent no-op and print top-level help, so
+    # the fallback path used to bring back the WRONG result (rails's
+    # top-level subcommands instead of generator names for
+    # `rails generate`). Stay strict: only try `cmd ... --help` and
+    # return nil if it doesn't work.
     ctx = Rubish::Builtins.context
     invoked = []
     ctx.define_singleton_method(:sandboxed_help_command) do |cmd|
       invoked << cmd
-      if cmd == 'fakecli help a b'
-        ["Usage: fakecli a b [options]\n\nOptions:\n  --quiet  silent mode for the operation\n  --loud   verbose mode\n", true]
-      else
-        [nil, false]
-      end
+      [nil, false]  # everything fails
     end
     ctx.instance_variable_set(:@help_completion_cache, {})
 
     parsed = Rubish::Builtins.parse_help_for_command('fakecli', 'a', 'b')
-    assert_includes parsed[:options], '--quiet'
-    assert_includes invoked, 'fakecli a b --help'  # tried first
-    assert_includes invoked, 'fakecli help a b'    # then fell back
+    assert_nil parsed
+    assert_equal ['fakecli a b --help'], invoked,
+                 'should only try `cmd a b --help`, not the `cmd help a b` fallback'
+  end
+
+  def test_parse_help_output_rails_generate_groups
+    # `rails generate --help` (inside a Rails app) lists generators
+    # under per-group headers like "Rails:" / "ActionMailbox:" /
+    # "ActionText:" — single-word colon-suffix headers whose CONTENT
+    # is a bare-identifier-per-line generator list, indented. The
+    # parser's short-header detection has to peek ahead and recognize
+    # those as commands sections (not options).
+    help_text = <<~HELP
+      Usage: bin/rails generate GENERATOR [args] [options]
+
+      General options:
+        -h, [--help], [--no-help]            # Print generator's options
+        -f, [--force]                        # Overwrite files
+
+      Please choose a generator below.
+
+      Rails:
+        application_record
+        controller
+        model
+        scaffold
+        scaffold_controller
+
+      ActionMailbox:
+        action_mailbox:ingress
+        action_mailbox:install
+
+      ActionText:
+        action_text:install
+    HELP
+
+    result = Rubish::Builtins.parse_help_output(help_text)
+    assert_includes result[:subcommands], 'application_record'
+    assert_includes result[:subcommands], 'scaffold'
+    assert_includes result[:subcommands], 'scaffold_controller'
+    # Thor-namespaced names with a `:` in the middle survive
+    assert_includes result[:subcommands], 'action_mailbox:install'
+    assert_includes result[:subcommands], 'action_text:install'
+    # "General options:" comes before the generator list; flags from it
+    # are still extracted as options, not as subcommands
+    assert_includes result[:options], '--help'
+    assert_includes result[:options], '--force'
+    refute_includes result[:subcommands], '--help'
   end
 
   def test_parse_help_for_command_backward_compat_single_subcommand

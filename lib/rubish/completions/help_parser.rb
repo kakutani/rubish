@@ -256,7 +256,15 @@ module Rubish
       # chain disambiguates intent.
       help_commands = if subcommand_chain.any?
         rest = subcommand_chain.join(' ')
-        ["#{command} #{rest} --help", "#{command} help #{rest}"]
+        # For nested calls only try `cmd a b ... --help`. The `cmd help
+        # a b ...` form is unreliable here: many CLIs (rails for one)
+        # treat `help` followed by anything they don't recognize as a
+        # silent no-op and print their top-level help instead. That
+        # output would parse as a perfectly valid (but wrong) result —
+        # `rails help generate` returns rails's top-level commands, so
+        # completion for `rails generate <TAB>` would offer rails's
+        # top-level subcommands instead of the generator names.
+        ["#{command} #{rest} --help"]
       elsif HELP_COMMAND_SOURCES.key?(command)
         # Use known source for popular commands
         [HELP_COMMAND_SOURCES[command]]
@@ -306,7 +314,7 @@ module Rubish
       in_commands_section = false
       in_options_section = false
 
-      lines.each do |line|
+      lines.each_with_index do |line, line_idx|
         # Detect section headers
         if line =~ /^(All\s+)?(Commands|COMMANDS|Subcommands|SUBCOMMANDS|Available commands):/i ||
            line =~ /commands are:$/i ||
@@ -322,15 +330,40 @@ module Rubish
           in_options_section = true
           next
         elsif line =~ /^[A-Z][-A-Za-z_]+:$/ || line =~ /^[A-Z][-A-Za-z_]+\s+[-A-Za-z_]+:$/
-          # Short section header (1-2 words) that's not a commands section.
-          # Set in_options_section to true to suppress subcommand detection
-          # (sections like "Features:", "Warning categories:", "Dump List:",
-          # "YJIT options:"). Exception: "Usage:" / "Synopsis:" / "Description:"
-          # are preamble headers commonly followed by command lists (rails),
-          # so we don't suppress subcommand detection for them.
+          # Short section header (1-2 words). Could be a non-commands
+          # section ("Features:", "Warning categories:", "Dump List:"
+          # — content shouldn't be treated as subcommands) or a
+          # command-listing group ("Rails:" / "ActionMailbox:" etc.
+          # in `rails generate --help`, listing generator names). Peek
+          # at the next non-blank line to disambiguate.
+          # Exception: "Usage:" / "Synopsis:" / "Description:" are
+          # preamble headers — don't flip any flags, let outside-section
+          # detection handle whatever follows.
           unless line =~ /\A(Usage|Synopsis|Description):\z/i
-            in_commands_section = false
-            in_options_section = true
+            peek = nil
+            (line_idx + 1).upto([line_idx + 4, lines.length - 1].min) do |j|
+              candidate = lines[j]
+              if candidate && !candidate.strip.empty?
+                peek = candidate
+                break
+              end
+            end
+            if peek && peek =~ /^\s+(-|\[-)/
+              # Next line looks like an option (`  -x ...` or `  [--foo]`)
+              in_commands_section = false
+              in_options_section = true
+            elsif peek && peek =~ /^\s+[a-z][-a-z0-9_:]*(\s*$|\s{2,}\S)/
+              # Next line looks like a subcommand (bare identifier or
+              # `  name  description` table format)
+              in_commands_section = true
+              in_options_section = false
+            else
+              # Can't tell — fall back to the conservative behavior of
+              # suppressing subcommand detection (matches the previous
+              # default for these headers).
+              in_commands_section = false
+              in_options_section = true
+            end
           end
         end
 
@@ -348,6 +381,13 @@ module Rubish
           elsif line =~ /^\s{2,}([a-z][-a-z0-9_]*):?\s{2,}/
             cmd = $1
             subcommands << cmd if cmd.length < 30 && !cmd.include?('=')
+          # Indented bare identifier (rails generate's "Rails:" / "ActionText:"
+          # generator groups list each name on its own indented line, with
+          # no description). Colons are allowed in the middle (Thor
+          # namespacing: `action_mailbox:install`).
+          elsif line =~ /^\s+([a-z][-a-z0-9_:]*)\s*$/
+            cmd = $1
+            subcommands << cmd if cmd.length < 40 && !cmd.include?('=')
           # Tab-indented table (launchctl style: "\tname  description")
           elsif line =~ /^\t+([a-z][-a-z0-9_]*):?\s{2,}/
             cmd = $1
