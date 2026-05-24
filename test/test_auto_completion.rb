@@ -694,13 +694,21 @@ class TestAutoCompletion < Test::Unit::TestCase
   # ==========================================================================
 
   def test_sandbox_timeout
-    # Verify timeout works (command should fail, not hang)
-    start = Time.now
-    output, success = Rubish::Builtins.sandboxed_help_command('sleep 10')
-    elapsed = Time.now - start
+    # Verify timeout works (command should fail, not hang). Force a short
+    # timeout so this test stays fast regardless of the rolling default
+    # (which we bumped to be generous to slow-booting framework CLIs).
+    saved = ENV['RUBISH_HELP_TIMEOUT']
+    ENV['RUBISH_HELP_TIMEOUT'] = '1'
+    begin
+      start = Time.now
+      _output, success = Rubish::Builtins.sandboxed_help_command('sleep 10')
+      elapsed = Time.now - start
 
-    assert_false success
-    assert elapsed < 5, "Timeout should have triggered in ~2 seconds, took #{elapsed}s"
+      assert_false success
+      assert elapsed < 3, "Timeout should have triggered in ~1 second, took #{elapsed}s"
+    ensure
+      saved ? (ENV['RUBISH_HELP_TIMEOUT'] = saved) : ENV.delete('RUBISH_HELP_TIMEOUT')
+    end
   end
 
   def test_sandbox_blocks_network

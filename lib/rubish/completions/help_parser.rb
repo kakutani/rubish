@@ -20,8 +20,16 @@ module Rubish
       @zsh_fpath = []
     end
 
-    # Timeout for help command execution (seconds)
-    HELP_COMMAND_TIMEOUT = 2
+    # Timeout for help command execution (seconds). Defaults to a value
+    # generous enough for frameworks that boot before printing `--help`
+    # (rails inside an app dir typically needs 3–5s). Tunable via env
+    # for users on slow machines or in unusual sandboxes.
+    HELP_COMMAND_TIMEOUT_DEFAULT = 5
+    def self.help_command_timeout
+      t = ENV['RUBISH_HELP_TIMEOUT'].to_i
+      t > 0 ? t : HELP_COMMAND_TIMEOUT_DEFAULT
+    end
+    HELP_COMMAND_TIMEOUT = HELP_COMMAND_TIMEOUT_DEFAULT  # kept for back-compat
 
     # macOS sandbox profile for running help commands safely
     # Denies network access, allows reads and writes only to safe locations
@@ -53,9 +61,13 @@ module Rubish
       Kernel.require 'open3'
       Kernel.require 'tempfile'
 
+      timeout = Builtins.help_command_timeout
+      $stderr.puts "[rubish-comp] running: #{help_cmd} (timeout=#{timeout}s)" if ENV['RUBISH_DEBUG_COMPLETION']
+
       pid = nil
       output = nil
       success = false
+      started_at = Time.now
 
       begin
         if RUBY_PLATFORM.include?('darwin')
@@ -70,10 +82,10 @@ module Rubish
             stdin.close
 
             # Use select with timeout to read output
-            ready = IO.select([stdout_err], nil, nil, HELP_COMMAND_TIMEOUT)
+            ready = IO.select([stdout_err], nil, nil, timeout)
             if ready
               output = stdout_err.read
-              wait_thr.join(HELP_COMMAND_TIMEOUT)
+              wait_thr.join(timeout)
               success = wait_thr.value&.success? || false
             else
               # Timeout - kill the process
@@ -91,10 +103,10 @@ module Rubish
           pid = wait_thr.pid
           stdin.close
 
-          ready = IO.select([stdout_err], nil, nil, HELP_COMMAND_TIMEOUT)
+          ready = IO.select([stdout_err], nil, nil, timeout)
           if ready
             output = stdout_err.read
-            wait_thr.join(HELP_COMMAND_TIMEOUT)
+            wait_thr.join(timeout)
             success = wait_thr.value&.success? || false
           else
             Process.kill('TERM', pid) rescue nil
@@ -102,6 +114,11 @@ module Rubish
             success = false
           end
           stdout_err.close
+        end
+
+        if ENV['RUBISH_DEBUG_COMPLETION']
+          elapsed = (Time.now - started_at).round(2)
+          $stderr.puts "[rubish-comp]   -> success=#{success} elapsed=#{elapsed}s output=#{output&.length || 0} bytes"
         end
 
         [output, success]
