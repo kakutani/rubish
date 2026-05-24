@@ -492,6 +492,66 @@ module Rubish
       incomplete_patterns.any? { |pattern| message =~ pattern }
     end
 
+    # True when a Ruby SyntaxError message indicates the parser was
+    # left waiting for more input — i.e. we should prompt for / read
+    # continuation lines, not give up. Care: "expecting end-of-input"
+    # is NOT the same thing — that means "I'm done parsing but there's
+    # stray content after". Only "unexpected end-of-input" (parser ran
+    # out), "unterminated" (string/regex/heredoc), and "expecting `end'"
+    # (missing the Ruby `end` keyword) mean we should ask for more.
+    def ruby_input_incomplete?(message)
+      return false if message.nil?
+
+      !!(message =~ /unexpected end-of-input/ ||
+         message =~ /unexpected end of file/ ||
+         message =~ /unterminated/ ||
+         message =~ /expecting `end'/)
+    end
+
+    # Eval a chunk of inline Ruby. If the chunk parses as incomplete
+    # (e.g. an unclosed `do …` block, missing `end`, unterminated
+    # string), prompt for continuation lines and retry — same UX as
+    # rubish's existing shell-side multi-line collection. Sourced
+    # files don't get the prompt (no TTY); they should have already
+    # accumulated the full block before reaching execute().
+    def run_inline_ruby(line, auto_call_lambda: false)
+      if Builtins.restricted_mode?
+        $stderr.puts 'rubish: restricted: cannot execute Ruby code'
+        @last_status = 1
+        return
+      end
+
+      collected = line.dup
+      loop do
+        begin
+          result = @context.instance_eval(collected)
+          result = result.call if auto_call_lambda && result.is_a?(Proc) && result.arity <= 0
+          p result unless result.nil?
+          @last_status = 0
+          @context.clear_exit_blocked
+          return
+        rescue SyntaxError => e
+          if ruby_input_incomplete?(e.message) && !@state.sourcing_file
+            cont = (@frontend.read_continuation_line(continuation_prompt) rescue nil)
+            if cont.nil?
+              # User cancelled (Ctrl-C / EOF) or no frontend available.
+              @last_status = 1
+              return
+            end
+            collected = "#{collected}\n#{cont}"
+            next
+          end
+          $stderr.puts "rubish: #{e.message}"
+          @last_status = 1
+          return
+        rescue StandardError => e
+          $stderr.puts "rubish: #{e.message}"
+          @last_status = 1
+          return
+        end
+      end
+    end
+
     # Collect continuation lines for multi-line commands
     def collect_continuation_lines(accumulated_lines, initial_error)
       loop do
@@ -810,44 +870,12 @@ module Rubish
       # UNIX commands rarely start with capitals, but Ruby constants/classes do
       # Exclude shell variable assignments (VAR=value, VAR+=value, VAR[n]=value)
       if line =~ /\A[A-Z]/ && line !~ /\A[A-Z_][A-Z0-9_]*(\[[^\]]*\])?\+?=/
-        if Builtins.restricted_mode?
-          $stderr.puts 'rubish: restricted: cannot execute Ruby code'
-          @last_status = 1
-          return
-        end
-        begin
-          result = @context.instance_eval(line)
-          p result unless result.nil?
-        rescue SyntaxError, StandardError => e
-          $stderr.puts "rubish: #{e.message}"
-          @last_status = 1
-          return
-        end
-        @last_status = 0
-        @context.clear_exit_blocked
-        return
+        return run_inline_ruby(line)
       end
 
       # Check if input is a Ruby lambda literal (-> { ... } or ->(args) { ... })
       if line =~ /\A->/
-        if Builtins.restricted_mode?
-          $stderr.puts 'rubish: restricted: cannot execute Ruby code'
-          @last_status = 1
-          return
-        end
-        begin
-          result = @context.instance_eval(line)
-          # Auto-call lambdas with no required arguments
-          result = result.call if result.is_a?(Proc) && result.arity <= 0
-          p result unless result.nil?
-        rescue SyntaxError, StandardError => e
-          $stderr.puts "rubish: #{e.message}"
-          @last_status = 1
-          return
-        end
-        @last_status = 0
-        @context.clear_exit_blocked
-        return
+        return run_inline_ruby(line, auto_call_lambda: true)
       end
 
       # Check for array assignment before tokenizing (arr=(a b c) pattern)

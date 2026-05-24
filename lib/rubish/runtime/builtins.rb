@@ -2128,6 +2128,28 @@ module Rubish
           # Track where buffer starts for error messages
           buffer_start_line = line_number if buffer.empty?
 
+          # Inline Ruby block detection. Lines starting with [A-Z] (Ruby
+          # constants like `Reline::Face.config(...) do …`) or `->`
+          # (lambda literals) are evaluated as Ruby by execute(). If
+          # the block spans multiple lines (`do |x| … end`), the
+          # shell-aware depth tracking below doesn't recognize Ruby's
+          # `do` as an opener, so we accumulate here using Ruby's own
+          # parser to detect completeness.
+          if buffer.empty? && ruby_block_start_line?(line)
+            ruby_buffer = line
+            while ruby_input_incomplete_ast?(ruby_buffer) && i < lines.length
+              next_raw = lines[i]
+              i += 1
+              ruby_buffer = "#{ruby_buffer}\n#{next_raw}"
+            end
+            begin
+              execute_sourced_command(ruby_buffer, file, buffer_start_line)
+            rescue SyntaxError => e
+              puts "source: #{file}:#{buffer_start_line}: syntax error: #{e.message}"
+            end
+            next
+          end
+
           # Check for heredoc in this line
           heredoc_info = detect_heredoc(line)
           if heredoc_info
@@ -7242,6 +7264,36 @@ module Rubish
       end
 
       in_single_quotes || in_double_quotes
+    end
+
+    # True when `line` plausibly starts an inline Ruby block — matches
+    # execute()'s own two cases (capital-letter constants / method
+    # calls, and `->` lambda literals). Shell variable assignments
+    # like `VAR=value` look superficially similar, so exclude them.
+    def ruby_block_start_line?(line)
+      return false if line.nil? || line.empty?
+      return false if line =~ /\A[A-Z_][A-Z0-9_]*(\[[^\]]*\])?\+?=/
+      line =~ /\A[A-Z]/ || line =~ /\A->/ ? true : false
+    end
+
+    # True when the accumulated Ruby chunk parses as incomplete — i.e.
+    # we should read more lines before handing to execute(). Anything
+    # that's not a "needs-more-input" error (real syntax problem, or
+    # successful parse) returns false so we stop accumulating.
+    # "expecting end-of-input" means stray content AFTER complete code,
+    # so it's a real error — explicitly NOT treated as incomplete.
+    def ruby_input_incomplete_ast?(code)
+      return false if code.nil? || code.strip.empty?
+      RubyVM::AbstractSyntaxTree.parse(code)
+      false
+    rescue SyntaxError => e
+      msg = e.message
+      !!(msg =~ /unexpected end-of-input/ ||
+         msg =~ /unexpected end of file/ ||
+         msg =~ /unterminated/ ||
+         msg =~ /expecting `end'/)
+    rescue
+      false
     end
 
     def detect_heredoc(line)
