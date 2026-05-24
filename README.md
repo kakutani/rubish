@@ -147,6 +147,8 @@ rubish$ ENV['HOME']
 => "/Users/you"
 ```
 
+Multi-line blocks work too — rubish detects unfinished Ruby (open `do`, missing `end`, unterminated strings, etc.) and prompts for continuation lines, both at the interactive prompt and inside sourced rcfiles. Only single-line interactive expressions get the IRB-style `=> …` value printed; multi-line blocks and sourced statements run silently for their side effects.
+
 ### Ruby array and regexp literals
 
 Ruby array literals can be used directly in shell context. Rubish distinguishes them from glob patterns like `[a-z]` automatically:
@@ -197,6 +199,23 @@ end
 ```
 
 You can also use the traditional `PS1`/`RPROMPT` variables with bash (`\X`) or zsh (`%X`) escape codes.
+
+### Completion dialog colors
+
+Rubish uses Reline's inline completion dialog (the fish-style suggestions popup) for tab-completion. Its colors are configured via [`Reline::Face`](https://docs.ruby-lang.org/en/master/Reline/Face.html). Drop a regular Ruby block in your rcfile:
+
+```ruby
+# In ~/.rubishrc or ~/.config/rubish/config
+Reline::Face.config(:completion_dialog) do |conf|
+  conf.define :default,   foreground: :cyan,  background: :black
+  conf.define :enhanced,  foreground: :black, background: :cyan, style: :bold
+  conf.define :scrollbar, foreground: :white, background: :black
+end
+```
+
+The three face names map to different parts of the dialog: `:default` for the unselected rows, `:enhanced` for the currently highlighted row, and `:scrollbar` for the scrollbar (visible when results overflow the popup). Colors can be a Reline symbol (`:black`, `:red`, `:green`, `:yellow`, `:blue`, `:magenta`, `:cyan`, `:white`, plus `:bright_*` / `:gray` variants) or a hex truecolor string like `'#abcdef'`. `:style` accepts `:bold`, `:faint`, `:italicized`, `:underlined`, `:blinking`, `:negative`, `:concealed`, `:crossed_out` — or an array of those for multiple effects.
+
+This works because rubish's inline Ruby evaluation handles multi-line blocks (see [Inline Ruby evaluation](#inline-ruby-evaluation)), so the natural `do … end` form is fine in both rcfiles and at the interactive prompt — no need for one-line reformatting.
 
 ### Lazy loading
 
