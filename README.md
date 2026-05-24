@@ -200,6 +200,36 @@ end
 
 You can also use the traditional `PS1`/`RPROMPT` variables with bash (`\X`) or zsh (`%X`) escape codes.
 
+### Tab completion
+
+Rubish tab-completes most commands out of the box, with no per-tool setup files to install. The completer derives subcommands and flags from each tool's own `--help` output, on demand:
+
+```
+rubish$ git <Tab>             # add  branch  checkout  clone  commit  …
+rubish$ gh pr <Tab>           # checkout  close  create  diff  edit  list  …
+rubish$ rails generate <Tab>  # scaffold  model  controller  channel  mailer  …
+rubish$ kubectl get <Tab>     # pods  services  deployments  …
+rubish$ cargo build --<Tab>   # --release  --target  --verbose  …
+```
+
+It walks arbitrarily deep — `rails generate scaffold --<Tab>` parses scaffold's own flags, `aws s3 cp --<Tab>` reaches AWS sub-sub-commands, and so on.
+
+How it stays correct, fast, and side-effect-free:
+
+- For a list of well-known tools (`gem`, `brew`, `cargo`, `aws`, `npm`, `gh`, `kubectl`, `pyenv`, `rbenv`, `launchctl`, `composer`, `hg`, …) rubish curates the right help invocation (`gem help commands`, `cargo --list`, `launchctl help`, etc.), so the cleanest output is used. For anything else it falls back to `<cmd> --help` then `<cmd> -h`.
+- Each result is cached for 30 minutes; repeat `<Tab>`s against the same chain are instant.
+- On macOS the help command runs inside a `sandbox-exec` profile with no network access and writes restricted to `/tmp`. Completing on an unfamiliar binary can never modify your filesystem — `touch help` won't accidentally create a file.
+- When zsh has a `_<cmd>` completion file in `$fpath`, rubish reads it too — improving completion for tools whose own `--help` is sparse.
+
+Other completion features:
+
+- **Inline auto-suggestion** (fish style) is on by default: as you type, the most likely completion appears in dim text after the cursor — press `<Right>` to accept it. `<Tab>` opens the full popup; see [Completion dialog colors](#completion-dialog-colors) to style it.
+- **Abbreviated path completion** (zsh style): `a/c/a<Tab>` expands to `app/controllers/application_controller.rb` — each component matches by prefix.
+- **Slow help commands**: framework CLIs like `rails` boot their full app just to print `--help`, which may exceed the default 5-second timeout. Bump it via `RUBISH_HELP_TIMEOUT=10`.
+- **Debugging**: `RUBISH_DEBUG_COMPLETION=1` prints each help-command invocation, its duration, and whether it produced parseable output on stderr.
+
+Bash- and zsh-style programmable completion (`complete -F`, `compgen`, `compdef`, `compinit`, `autoload`) is supported too, for tools where the auto-help path isn't enough. Existing completion scripts Just Work.
+
 ### Completion dialog colors
 
 Rubish uses Reline's inline completion dialog (the fish-style suggestions popup) for tab-completion. Its colors are configured via [`Reline::Face`](https://docs.ruby-lang.org/en/master/Reline/Face.html). Drop a regular Ruby block in your rcfile:
@@ -246,7 +276,7 @@ In addition to full Bash compatibility, rubish also supports zsh-style features:
 - `compdef`/`compinit`
 - `autoload` with `fpath`
 - `%X` prompt codes and `RPROMPT`/`RPS1`
-- Abbreviated path expansion: type `a/c/a<Tab>` and it expands to `app/controllers/application_controller.rb`
+- Abbreviated path expansion (see [Tab completion](#tab-completion))
 
 ### Configuration files
 
