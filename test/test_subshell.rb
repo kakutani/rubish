@@ -23,9 +23,14 @@ class TestSubshell < Test::Unit::TestCase
   end
 
   def test_parens_still_works_for_functions
-    tokens = Rubish::Lexer.new('foo()').tokenize
+    # `foo() { body }` is the function-definition form — the lexer
+    # emits WORD + PARENS + LBRACE here. Bare `foo()` (no body) is
+    # a FUNC_CALL, covered by test_empty_parens_is_func_call in
+    # test_lexer.rb.
+    tokens = Rubish::Lexer.new('foo() { :; }').tokenize
     assert_equal :WORD, tokens[0].type
     assert_equal :PARENS, tokens[1].type
+    assert_equal :LBRACE, tokens[2].type
   end
 
   def test_subshell_tokenization

@@ -325,12 +325,24 @@ class TestLexer < Test::Unit::TestCase
     assert_equal :RPAREN, tokens[3].type
   end
 
-  # Empty parens should be function definition, not function call
-  def test_empty_parens_is_func_def
+  # Bare `foo()` lexes as a FUNC_CALL (zero-arg call). The
+  # function-definition syntax — `foo() { body }` — disambiguates
+  # via the following `{`: the lexer then emits WORD + PARENS so the
+  # parser can build an AST::Function.
+  def test_empty_parens_is_func_call
     tokens = tokenize('foo()')
-    assert_equal 2, tokens.length
+    assert_equal 1, tokens.length
+    assert_equal :FUNC_CALL, tokens[0].type
+    assert_equal({name: 'foo', args: []}, tokens[0].value)
+  end
+
+  def test_empty_parens_followed_by_brace_is_func_def
+    tokens = tokenize('foo() { :; }')
     assert_equal :WORD, tokens[0].type
+    assert_equal 'foo', tokens[0].value
     assert_equal :PARENS, tokens[1].type
+    assert_equal '()', tokens[1].value
+    assert_equal :LBRACE, tokens[2].type
   end
 
   # Function call with whitespace around args

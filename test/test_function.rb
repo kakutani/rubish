@@ -26,10 +26,13 @@ class TestFunction < Test::Unit::TestCase
   end
 
   def test_parens_token
-    tokens = Rubish::Lexer.new('foo()').tokenize
+    # PARENS is the func-def marker. Bare `foo()` is a FUNC_CALL; the
+    # PARENS form only surfaces when followed by a body `{ ... }`.
+    tokens = Rubish::Lexer.new('foo() { :; }').tokenize
     assert_equal :WORD, tokens[0].type
     assert_equal :PARENS, tokens[1].type
     assert_equal '()', tokens[1].value
+    assert_equal :LBRACE, tokens[2].type
   end
 
   def test_function_keyword_tokenization
