@@ -327,7 +327,15 @@ module Rubish
         args << parse_arg
       end
 
-      cmd = AST::Command.new(name: name, args: args, env: prefix_env)
+      # Trailing block: `cmd { |x| body }` is sugar for `cmd.each { ... }`.
+      # Runtime is already wired — Command#run_with_block iterates the
+      # process's stdout lines and yields each chomped line to the
+      # block, which is exactly what .each {block} does. Just need the
+      # block attached here so codegen's existing "__cmd(...) { block }"
+      # path picks it up.
+      block = consume(:BLOCK).value if peek(:BLOCK)
+
+      cmd = AST::Command.new(name: name, args: args, block: block, env: prefix_env)
       parse_redirections(cmd)
     end
 
