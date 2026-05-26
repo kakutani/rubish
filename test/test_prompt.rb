@@ -11,6 +11,18 @@ class TestPrompt < Test::Unit::TestCase
     @original_env = ENV.to_h.dup
     @original_dir = Dir.pwd
     @tempdir = Dir.mktmpdir('rubish_prompt_test')
+    # git_prompt_info tests assume they're running in *some* git repo;
+    # initialize one in the tempdir so the assumption holds regardless
+    # of where the test suite was launched from (rubish source dir
+    # works; a fresh checkout, gem install, or Docker container without
+    # .git does not).
+    Dir.chdir(@tempdir) do
+      system('git init -q 2>/dev/null')
+      system('git config user.email "test@example.com" 2>/dev/null')
+      system('git config user.name "Test" 2>/dev/null')
+      system('git commit --allow-empty -m init -q 2>/dev/null')
+    end
+    Dir.chdir(@tempdir)
   end
 
   def teardown
